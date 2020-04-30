@@ -63,22 +63,25 @@ namespace juce
                 m_time = 0.0;
             }
             
-            float monoBuffer [buffer.getNumSamples()];
-            
+			const int bufSize = buffer.getNumSamples();
+
+			
             // generate sin wave in mono
             for (int sample = 0; sample < buffer.getNumSamples(); sample++) {
                 
                 float value = m_amplitude * sin(2 * double_Pi * m_frequency * m_time + m_phase);
                 value *= adsr.getNextSample();
                 
-                monoBuffer[sample] = value;
-                m_time += m_deltaTime;
+				m_time += m_deltaTime;
+
+				for (int chan = buffer.getNumChannels() - 1; chan >= 0; chan--)
+				{
+					buffer.addSample(chan,  sample, value);
+				}
+
             }
             
-            for (int chan = 0; chan < buffer.getNumChannels(); chan++)
-            {
-                buffer.copyFrom(chan, 0, monoBuffer, buffer.getNumSamples());
-            }
+          
         }
 
         void releaseResources()
@@ -104,7 +107,7 @@ namespace juce
         float m_phase;
         float m_time;
         float m_deltaTime;
-        
+       
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SineWave)
     };
 }
