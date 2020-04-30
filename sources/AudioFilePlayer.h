@@ -21,6 +21,13 @@ namespace juce
       
     public:
         
+        enum State
+        {
+            idle,
+            playing,
+            stopping
+        };
+        
         AudioFilePlayer(String name = "");
 
         AudioFilePlayer(const void *sourceData, size_t sourceDataSize, bool keepInternalCopyOfData, String name = "", int index = -1);
@@ -29,6 +36,9 @@ namespace juce
 
         void play();
         void stop();
+        
+        State getState();
+        bool isActive();
         
         void prepareToPlay(int samplesPerBlockExpected, double sampleRate);
         void releaseResources();
@@ -53,6 +63,8 @@ namespace juce
         
     private:
         
+        Atomic<State> state;
+                
         int index = -1;
         int ID = -1;
         
@@ -65,7 +77,6 @@ namespace juce
         int currentPlayBackSample = 0;
 
         bool loop = false;
-        bool playing = false;
         
         ADSR adsr;
         GainCtrl gain;

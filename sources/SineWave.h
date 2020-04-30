@@ -19,55 +19,66 @@ namespace juce
     public:
         SineWave()
         {
-
         }
 
         void prepareToPlay(int samplesPerBlockExpected, double sampleRate)
         {
-            currentSampleRate = sampleRate;
-            updateAngleDelta();
-            adsr.setSampleRate(sampleRate);
+
+            m_amplitude = 0.5;
+            m_frequency = 440;
+            m_phase = 0.0;
+            m_time = 0.0;
+            m_deltaTime = 1 / sampleRate;
             
             ADSR::Parameters par;
+            
             par.attack = 0.02;
             par.decay = 0.02;
-            par.sustain = 0.8;
+            par.sustain = 1;
             par.release = 0.02;
+            
             adsr.setParameters(par);
+            
+            isPrepared.set(true);
         }
-
+        
+        void start()
+        {
+            ScopedLock sl (cs);
+            adsr.noteOn();
+        }
+        
+        void stop()
+        {
+            ScopedLock sl (cs);
+            adsr.noteOff();
+        }
+        
         void process(AudioBuffer<float>& buffer)
         {
-            auto* leftBuffer = buffer.getWritePointer(0, 0);
-            auto* rightBuffer = buffer.getWritePointer(1, 0);
-
-            auto localTargetFrequency = targetFrequency;
-            if (localTargetFrequency != currentFrequency)                                                              // [7]
-            {
-                auto frequencyIncrement = (localTargetFrequency - currentFrequency) / buffer.getNumSamples();         // [8]
-                for (auto sample = 0; sample < buffer.getNumSamples(); ++sample)
-                {
-                    auto currentSample = (float)std::sin(currentAngle);
-                    currentFrequency += frequencyIncrement;                                                            // [9]
-                    updateAngleDelta();                                                                                // [10]
-                    currentAngle += angleDelta;
-                    leftBuffer[sample] = currentSample;
-                    rightBuffer[sample] = currentSample;
-                }
-                currentFrequency = localTargetFrequency;
+            
+            ScopedLock sl (cs);
+  
+            if (m_time >= std::numeric_limits<float>::max()) {
+                m_time = 0.0;
             }
-            else                                                                                                       // [11]
-            {
-                for (auto sample = 0; sample < buffer.getNumSamples(); ++sample)
-                {
-                    auto currentSample = (float)std::sin(currentAngle);
-                    currentAngle += angleDelta;
-                    leftBuffer[sample] = currentSample;
-                    rightBuffer[sample] = currentSample;
-                }
+            
+            float monoBuffer [buffer.getNumSamples()];
+            
+            // generate sin wave in mono
+            for (int sample = 0; sample < buffer.getNumSamples(); sample++) {
+                
+                float value = m_amplitude * sin(2 * double_Pi * m_frequency * m_time + m_phase);
+                value *= adsr.getNextSample();
+                
+                monoBuffer[sample] = value;
+                m_time += m_deltaTime;
             }
-
-            adsr.applyEnvelopeToBuffer(buffer, 0, buffer.getNumSamples());
+            
+            for (int chan = 0; chan < buffer.getNumChannels(); chan++)
+            {
+                buffer.copyFrom(chan, 0, monoBuffer, buffer.getNumSamples());
+            }
         }
 
         void releaseResources()
@@ -81,28 +92,19 @@ namespace juce
             Timer::callAfterDelay(milliseconds, [&]() {adsr.noteOff(); });
         }
         
-        void playBeep(float freq, int milliseconds)
-        {
-            targetFrequency = freq;
-            playBeep(milliseconds);
-        }
-        
     private:
 
-        void updateAngleDelta()
-        {
-            auto cyclesPerSample = currentFrequency / currentSampleRate;         // [2]
-            angleDelta = cyclesPerSample * 2.0 * MathConstants<double>::pi;                // [3]
-        }
+        CriticalSection cs;
+        Atomic<bool> isPrepared = false;
 
         ADSR adsr;
 
-        double currentAngle = 0;
-        double angleDelta = 0;
-        double currentSampleRate = 0;
-        float currentFrequency = 0.f;
-        float targetFrequency = 440.f;
-
+        float m_amplitude;
+        float m_frequency;
+        float m_phase;
+        float m_time;
+        float m_deltaTime;
+        
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SineWave)
     };
 }

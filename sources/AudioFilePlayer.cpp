@@ -35,15 +35,23 @@ AudioFilePlayer::~AudioFilePlayer()
 }
 
 void AudioFilePlayer::play() {
-    playing = true;
+    state = playing;
     adsr.noteOn();
 }
 
 void AudioFilePlayer::stop() {
+    state = stopping;
     adsr.noteOff();
-    float releaseTime = adsr.getParameters().release;
-    std::unique_ptr<AudioFilePlayer> instance(this);
-    Timer::callAfterDelay(releaseTime*1000, [&](){if(instance) playing = false; });
+}
+
+AudioFilePlayer::State AudioFilePlayer::getState()
+{
+    return state.get();
+}
+
+bool AudioFilePlayer::isActive()
+{
+    return state.get() != idle;
 }
 
 void AudioFilePlayer::prepareToPlay(int samplesPerBlockExpected, double sampleRate) {
@@ -75,10 +83,9 @@ void AudioFilePlayer::process(AudioBuffer<float>& buffer) {
     
     // lagrange interpolation
     
-    if (reader && playing)
+    if (reader && state.get() != idle)
     {
         auto sr_play = sampleRate;
-        
         
         jassert (reader.get() != nullptr);
         
@@ -108,8 +115,11 @@ void AudioFilePlayer::process(AudioBuffer<float>& buffer) {
         currentPlayBackSample = ((int)currentPlayBackSample + (int)numSamplesToRead) % reader->lengthInSamples;
         
         if (!loop && lastPlayBackSample > currentPlayBackSample)
-            playing = false;
+            state = idle;
     }
+    
+    if (state.get() == stopping && !adsr.isActive())
+        state = idle;
     
     adsr.applyEnvelopeToBuffer(buffer, 0, buffer.getNumSamples());
     gain.applyToBuffer(buffer, 0, buffer.getNumSamples());

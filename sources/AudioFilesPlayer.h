@@ -51,6 +51,9 @@ namespace juce
 
         
     private:
+        
+        CriticalSection cs;
+        
         OwnedArray<AudioFilePlayer> audioFiles;
         int samplesPerBlockExpected;
         double sampleRate;

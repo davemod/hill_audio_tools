@@ -100,6 +100,7 @@ void AudioFilesPlayer::releaseResources() {
 
 void AudioFilesPlayer::process(AudioBuffer<float> &buffer) {
     
+    ScopedLock sl (cs);
     jassert (sampleRate > 0);
     
     AudioBuffer<float> musicBuffer;
