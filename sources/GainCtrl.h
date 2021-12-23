@@ -12,8 +12,10 @@
 
 #include "../JuceLibraryCode/JuceHeader.h"
 
-namespace juce
+namespace hill_AudioTools
 {
+    using namespace juce;
+    
     class GainCtrl
     {
 

@@ -10,21 +10,28 @@
 
 #include "AudioFilesPlayer.h"
 
+namespace hill_AudioTools
+{
 
+#if ENABLE_SINGLETON_PLAYER
 JUCE_IMPLEMENT_SINGLETON(AudioFilesPlayer)
+#endif
 
 AudioFilesPlayer::AudioFilesPlayer()
 {
-    sampleRate = 44100;
 }
 
 AudioFilesPlayer::~AudioFilesPlayer()
 {
+#if ENABLE_SINGLETON_PLAYER
     clearSingletonInstance();
+#endif
 }
 
 AudioFilePlayer* AudioFilesPlayer::loadFile(const void *sourceData, size_t sourceDataSize, bool keepInternalCopyOfData, String name)
 {
+    ScopedLock sl {cs};
+    
     // call prepareToPlay() first
     jassert (sampleRate>0);
     
@@ -35,88 +42,101 @@ AudioFilePlayer* AudioFilesPlayer::loadFile(const void *sourceData, size_t sourc
     return file;
 }
 
+AudioFilePlayer* AudioFilesPlayer::loadFile(const File& file, const String& name)
+{
+    ScopedLock sl {cs};
+    
+    // call prepareToPlay() first
+    jassert (sampleRate>0);
 
-
-
+    auto player = audioFiles.add (new AudioFilePlayer (file, name, audioFiles.size()));
+    
+    player->prepareToPlay (samplesPerBlockExpected, sampleRate);
+    
+    return player;
+}
 
 void AudioFilesPlayer::playFile(String name)
 {
-    for (auto file : audioFiles)
-        if (file->getName() == name)
-            file->play();
+    if (auto file = getFile(name))
+        file->play();
 }
 
 void AudioFilesPlayer::playFileWithId(int ID)
 {
-    for (auto file : audioFiles)
-        if (file->getID() == ID)
-            file->play();
+    if (auto file = getFileById(ID))
+        file->play();
 }
+
 void AudioFilesPlayer::playFileWithIndex(int index)
 {
-    for (auto file : audioFiles)
-        if (file->getIndex() == index)
-            file->play();
+    if (auto file = getFileByIndex(index))
+        file->play();
 }
+
 void AudioFilesPlayer::stopFile(String name)
 {
-    for (auto file : audioFiles)
-        if (file->getName() == name)
-            file->stop();
+    if (auto file = getFile(name))
+        file->stop();
 }
+
 void AudioFilesPlayer::stopFileWithId(int ID)
 {
-    for (auto file : audioFiles)
-        if (file->getID() == ID)
-            file->stop();
+    if (auto file = getFileById(ID))
+        file->stop();
 }
+
 void AudioFilesPlayer::stopFileWithIndex(int index)
 {
-    for (auto file : audioFiles)
-        if (file->getIndex() == index)
-            file->stop();
+    if (auto file = getFileByIndex(index))
+        file->stop();
 }
+
 void AudioFilesPlayer::playAll()
 {
     for (auto file : audioFiles)
         file->play();
 }
+
 void AudioFilesPlayer::stopAll()
 {
     for (auto file : audioFiles)
         file->stop();
 }
 
-
-
 void AudioFilesPlayer::prepareToPlay(int samplesPerBlockExpected, double sampleRate)
 {
+    ScopedLock sl {cs};
+    
     this->sampleRate = sampleRate;
     this->samplesPerBlockExpected = samplesPerBlockExpected;
-}
-
-void AudioFilesPlayer::releaseResources() {
-}
-
-void AudioFilesPlayer::process(AudioBuffer<float> &buffer) {
-    
-    ScopedLock sl (cs);
-    jassert (sampleRate > 0);
-    
-    AudioBuffer<float> musicBuffer;
-    musicBuffer.setSize(buffer.getNumChannels(), buffer.getNumSamples());
-    musicBuffer.clear();
     
     for (auto file : audioFiles)
     {
-        file->process(musicBuffer);
+        file->prepareToPlay(samplesPerBlockExpected, sampleRate);
     }
-    
-    for (int i = 0; i < musicBuffer.getNumChannels(); i++)
-    {
-        buffer.addFrom(i, 0, musicBuffer, i, 0, musicBuffer.getNumSamples());
-    }
+}
 
+void AudioFilesPlayer::releaseResources()
+{
+    ScopedLock sl {cs};
+    for (auto file : audioFiles)
+    {
+        file->releaseResources ();
+    }
+}
+
+void AudioFilesPlayer::process(AudioBuffer<float> &buffer)
+{
+    if (cs.tryEnter())
+    {
+        for (auto file : audioFiles)
+        {
+            file->process(buffer);
+        }
+        
+        cs.exit ();
+    }
 }
 
 AudioFilePlayer* AudioFilesPlayer::getFile(String name)
@@ -145,13 +165,7 @@ AudioFilePlayer* AudioFilesPlayer::getFileById(int ID)
 
 AudioFilePlayer* AudioFilesPlayer::getFileByIndex(int index)
 {
-    for (auto file : audioFiles)
-    {
-        if (file->getIndex() == index)
-        {
-            return file;
-        }
-    }
-    return nullptr;
+    return audioFiles [index];
 }
 
+}

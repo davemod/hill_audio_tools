@@ -10,6 +10,9 @@
 
 #include "GainCtrl.h"
 
+namespace hill_AudioTools
+{
+
 GainCtrl::GainCtrl()
 {
     sr = 44100;
@@ -70,5 +73,4 @@ float GainCtrl::getGain()
     return gain;
 }
 
-
-
+}

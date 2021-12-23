@@ -10,6 +10,9 @@
 
 #include "AudioFilePlayer.h"
 
+namespace hill_AudioTools
+{
+
 AudioFilePlayer::AudioFilePlayer(String name)
 {
     this->name = name;
@@ -27,6 +30,16 @@ AudioFilePlayer::AudioFilePlayer(const void *sourceData, size_t sourceDataSize, 
 }
 
 
+AudioFilePlayer::AudioFilePlayer(const File& file, String name, int index)
+{
+    
+    this->name = name;
+    this->index = index;
+    
+    initialize();
+    
+    loadFile(file);
+}
 
 
 AudioFilePlayer::~AudioFilePlayer()
@@ -66,14 +79,19 @@ void AudioFilePlayer::prepareToPlay(int samplesPerBlockExpected, double sampleRa
     {
         interpolator->reset();
     }
+    
+    adsr.setParameters(par);
 }
 
-void AudioFilePlayer::releaseResources() {
+void AudioFilePlayer::releaseResources()
+{
+    lris.clear();
+    readBuffer.clear();
 }
 
 void AudioFilePlayer::process(AudioBuffer<float>& buffer) {
     
-    if (sampleRate <= 0)
+    if (sampleRate.get() <= 0)
         return;
     
     if (buffer.getNumChannels() != lris.size())
@@ -83,59 +101,91 @@ void AudioFilePlayer::process(AudioBuffer<float>& buffer) {
     
     // lagrange interpolation
     
-    if (reader && state.get() != idle)
+    if (cs.tryEnter())
     {
-        auto sr_play = sampleRate;
+        if (reader && state.get() != idle)
+        {
+            auto sr_play = sampleRate.get();
+            
+            auto sr_file = reader.get()->sampleRate;
+            
+            auto ratio = sr_file / sr_play;
+            
+            auto numSamplesToRead = (int)(buffer.getNumSamples() * ratio);
+            
+            if (readBuffer.getNumSamples() < numSamplesToRead)
+            {
+                initReaderBuffer(numSamplesToRead + 20);
+            }
         
-        jassert (reader.get() != nullptr);
-        
-        auto sr_file = reader.get()->sampleRate;
-        
-        auto ratio = sr_file / sr_play;
-        
-//      ohne lagrange interpolation
-//        auto numSamplesToRead = buffer.getNumSamples();
-        
-        auto numSamplesToRead = (int)(buffer.getNumSamples() * ratio);
-        
-        AudioBuffer<float> readBuffer = AudioBuffer<float>(buffer.getNumChannels(), numSamplesToRead);
-    
-        reader->read(&readBuffer, 0, numSamplesToRead, currentPlayBackSample, true, true);
-        
-        
-        for (int chan = 0; chan < buffer.getNumChannels(); chan++){
-        
-            auto lri = lris[chan]; // als member
+            reader->read(&readBuffer, 0, numSamplesToRead, currentPlayBackSample, true, true);
+            
+            adsr.applyEnvelopeToBuffer(readBuffer, 0, readBuffer.getNumSamples());
+            gain.applyToBuffer(readBuffer, 0, readBuffer.getNumSamples());
 
-            lri->process(ratio, readBuffer.getReadPointer(chan), buffer.getWritePointer(chan), buffer.getNumSamples(),numSamplesToRead,1);
+            for (int chan = 0; chan < buffer.getNumChannels(); chan++)
+            {
+                if (chan < readBuffer.getNumChannels())
+                {
+                    auto lri = lris[chan]; // als member
+
+                    lri->processAdding(ratio,
+                                       readBuffer.getReadPointer(chan),
+                                       buffer.getWritePointer(chan),
+                                       buffer.getNumSamples(),
+                                       numSamplesToRead,
+                                       true,
+                                       1.0f);
+                }
+            }
+            
+            int64 lastPlayBackSample = currentPlayBackSample;
+            
+            currentPlayBackSample = (currentPlayBackSample + (int64)numSamplesToRead) % reader->lengthInSamples;
+            
+            if (!loop.get() && lastPlayBackSample > currentPlayBackSample)
+                state = idle;
         }
         
-        int lastPlayBackSample = currentPlayBackSample;
-        
-        currentPlayBackSample = ((int)currentPlayBackSample + (int)numSamplesToRead) % reader->lengthInSamples;
-        
-        if (!loop && lastPlayBackSample > currentPlayBackSample)
+        if (state.get() == stopping && !adsr.isActive())
             state = idle;
+        
+        cs.exit();
     }
-    
-    if (state.get() == stopping && !adsr.isActive())
-        state = idle;
-    
-    adsr.applyEnvelopeToBuffer(buffer, 0, buffer.getNumSamples());
-    gain.applyToBuffer(buffer, 0, buffer.getNumSamples());
 }
 
 void AudioFilePlayer::loadFile(const void *sourceData, size_t sourceDataSize, bool keepInternalCopyOfData) {
     
-    auto* stream = new MemoryInputStream ( sourceData, sourceDataSize, keepInternalCopyOfData );
+    std::unique_ptr<MemoryInputStream> stream = std::make_unique<MemoryInputStream>( sourceData, sourceDataSize, keepInternalCopyOfData );
     
-    if (auto* newreader = afm.createReaderFor(stream))
+    if (auto* newreader = afm.createReaderFor(std::make_unique<MemoryInputStream>(sourceData, sourceDataSize, keepInternalCopyOfData)))
     {
-        reader = newreader;
+        ScopedLock sl {cs};
+        reader.reset (newreader);
+        initReaderBuffer();
     }
     else
     {
+        /** could not create a reader for this data */
         jassertfalse;
+    }
+}
+
+void AudioFilePlayer::loadFile(const File& file)
+{
+    if (file.existsAsFile())
+    {
+        if (auto* newReader = afm.createReaderFor(file))
+        {
+            ScopedLock sl {cs};
+            reader.reset (newReader);
+            initReaderBuffer ();
+        }
+        else
+        {
+            /** Could not create a reader for this file */
+            jassertfalse;
+        }
     }
 }
 
@@ -144,32 +194,6 @@ void AudioFilePlayer::setGain(float gain_, int time)
     gain.setGain(gain_, time);
 }
 
-void AudioFilePlayer::setIndex(int index)
-{
-    this->index = index;
-}
-
-void AudioFilePlayer::setName(String name)
-{
-    this->name = name;
-}
-
-int AudioFilePlayer::getIndex()
-{
-    return index;
-}
-
-int AudioFilePlayer::getID()
-{
-    return ID;
-}
-
-String AudioFilePlayer::getName()
-{
-    return name;
-}
-
-
 void AudioFilePlayer::initialize()
 {
     static int id_ = 0;
@@ -177,11 +201,11 @@ void AudioFilePlayer::initialize()
     
     afm.registerBasicFormats();
     
-    ADSR::Parameters par;
     par.attack = 0.02;
     par.decay = 0.02;
     par.sustain = 1.;
     par.release = 0.02;
+    
     adsr.setParameters(par);
     
     gain.setGain(1.f);
@@ -192,6 +216,21 @@ void AudioFilePlayer::initLagrangeInterpolators(int numChannels)
     lris.clear();
     for (int i = 0; i < numChannels; i++)
     {
-        lris.add(new LagrangeInterpolator());
+        auto lri = lris.add(new LagrangeInterpolator());
+        lri->reset();
     }
+}
+
+void AudioFilePlayer::initReaderBuffer (int numSamples)
+{
+    // first initialize the reader with a file or audio data using loadFile
+    jassert (reader);
+    
+    if (reader)
+    {
+        readBuffer.setSize (reader->getChannelLayout ().size(), numSamples);
+        
+    }
+}
+
 }

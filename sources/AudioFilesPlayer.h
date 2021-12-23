@@ -13,21 +13,24 @@
 #include "AudioFilePlayer.h"
 #include "../JuceLibraryCode/JuceHeader.h"
 
-namespace juce
+namespace hill_AudioTools
 {
     class AudioFilesPlayer : private DeletedAtShutdown
     {
     public:
 
+#if ENABLE_SINGLETON_PLAYER
         JUCE_DECLARE_SINGLETON(AudioFilesPlayer, true)
-
+#endif
+        
         AudioFilesPlayer();
         ~AudioFilesPlayer();
 
         AudioFilePlayer* loadFile(const void* sourceData,
                       size_t sourceDataSize,
                       bool keepInternalCopyOfData, String name);
-        
+        AudioFilePlayer* loadFile(const File& file, const String& name);
+
         void playFile(String name);
         void playFileWithId(int ID);
         void playFileWithIndex(int index);
@@ -43,19 +46,16 @@ namespace juce
         void releaseResources();
         void process(AudioBuffer<float>& buffer);
         
-        
         AudioFilePlayer* getFile(String name);
         AudioFilePlayer* getFileById(int ID);
         AudioFilePlayer* getFileByIndex(int index);
         
-
-        
     private:
         
         CriticalSection cs;
-        
         OwnedArray<AudioFilePlayer> audioFiles;
-        int samplesPerBlockExpected;
-        double sampleRate;
+        
+        int samplesPerBlockExpected {0};
+        double sampleRate {0.0};
     };
 }

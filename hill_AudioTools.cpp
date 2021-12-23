@@ -1,4 +1,4 @@
-#include "hill_audio_tools.h"
+#include "hill_AudioTools.h"
 
 // SineWave is only a header file. no need to implement a cpp
 #include "sources/GainCtrl.cpp"

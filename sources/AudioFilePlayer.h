@@ -14,8 +14,10 @@
 
 #include "../JuceLibraryCode/JuceHeader.h"
 
-namespace juce
+namespace hill_AudioTools
 {
+    using namespace juce;
+
     class AudioFilePlayer
     {
       
@@ -31,6 +33,7 @@ namespace juce
         AudioFilePlayer(String name = "");
 
         AudioFilePlayer(const void *sourceData, size_t sourceDataSize, bool keepInternalCopyOfData, String name = "", int index = -1);
+        AudioFilePlayer(const File& file, const String name = "", int index = -1);
         
         ~AudioFilePlayer();
 
@@ -47,51 +50,53 @@ namespace juce
         void loadFile(const void* sourceData,
                       size_t sourceDataSize,
                       bool keepInternalCopyOfData);
+        void loadFile(const File& file);
         
         void setGain(float gain, int time = 0);
         
-        void setIndex(int index);
-        void setName(String name);
-        
         void setLoop (bool b) { loop = b; }
-        bool isLoop () { return loop; }
+        bool getLoop () { return loop.get(); }
+    
+        void setIndex (int i) { index = i; }
+        int getIndex() { return index; }
+            
+        void setName(String newName) { name = newName; }
+        String getName() { return name; }
         
-        int getIndex();
-        int getID();
-        
-        String getName();
-        
+        int getID() { return ID; }
+    
     private:
+        
+        AudioFormatManager afm;
+        std::unique_ptr<AudioFormatReader> reader;
+        
+        AudioBuffer<float> readBuffer {2,2048};
+        CriticalSection cs;
         
         Atomic<State> state;
                 
+        String name = "";
         int index = -1;
         int ID = -1;
-        
-        AudioFormatManager afm;
-        ScopedPointer<AudioFormatReader> reader;
-        
-        int samplesPerBlockExpected;
-        double sampleRate;
-        
-        int currentPlayBackSample = 0;
-
-        bool loop = false;
+                
+        Atomic<int> samplesPerBlockExpected;
+        Atomic<double> sampleRate;
+        Atomic<bool> loop {false};
         
         ADSR adsr;
+        ADSR::Parameters par;
+        void setAdsrParamters ();
+
         GainCtrl gain;
         
-        String name = "";
-
-        void    initialize();
-        void    initLagrangeInterpolators(int numChannels);
+        int64 currentPlayBackSample = 0;
         
         OwnedArray<LagrangeInterpolator> lris;
-        
-        AudioDeviceManager * deviceManager;
+
+        void initialize();
+        void initLagrangeInterpolators(int numChannels);
+        void initReaderBuffer (int numSamples = 2048);
         
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioFilePlayer)
-
-        
     };
 }
